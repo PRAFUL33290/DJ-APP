@@ -39,6 +39,17 @@ Reponds UNIQUEMENT avec un JSON valide au format suivant, sans aucun texte avant
   ]
 }`;
 
+const AUTOCORRECT_SYSTEM_PROMPT = `Tu es un assistant qui corrige l'orthographe des titres de chansons.
+On te donne un titre (avec fautes possibles) et tu dois proposer :
+- title: le titre corrige
+- artist: l'artiste le plus probable si tu es sur, sinon une chaine vide
+
+Reponds UNIQUEMENT avec un JSON valide au format suivant, sans aucun texte avant ou apres :
+{
+  "title": "Titre corrige",
+  "artist": "Nom de l'artiste ou chaine vide"
+}`;
+
 function buildUserPrompt(songTitle, artistName, searchMode) {
   let prompt = `Chanson actuelle : "${songTitle}"`;
   if (artistName) {
@@ -97,6 +108,28 @@ function parseAIResponse(responseText) {
       reason: rec.reason || '',
       popularity: clampPopularity(rec.popularity),
     })),
+  };
+}
+
+function buildAutoCorrectPrompt(songTitle) {
+  return `Titre a corriger : "${songTitle}"\nReponds uniquement en JSON.`;
+}
+
+function parseAutoCorrectResponse(responseText) {
+  let jsonStr = responseText.trim();
+  const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (jsonMatch) {
+    jsonStr = jsonMatch[1].trim();
+  }
+  const objectMatch = jsonStr.match(/\{[\s\S]*\}/);
+  if (objectMatch) {
+    jsonStr = objectMatch[0];
+  }
+
+  const parsed = JSON.parse(jsonStr);
+  return {
+    title: parsed.title || '',
+    artist: parsed.artist || '',
   };
 }
 
@@ -176,6 +209,122 @@ async function searchWithOpenAI(apiKey, songTitle, artistName, searchMode, opena
   return parseAIResponse(text);
 }
 
+async function autoCorrectWithClaude(apiKey, songTitle) {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 256,
+      system: AUTOCORRECT_SYSTEM_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: buildAutoCorrectPrompt(songTitle),
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(
+      `Claude API error: ${response.status} - ${errorData.error?.message || response.statusText}`
+    );
+  }
+
+  const data = await response.json();
+  const text = data.content?.[0]?.text;
+  if (!text) {
+    throw new Error('Empty response from Claude API');
+  }
+
+  return parseAutoCorrectResponse(text);
+}
+
+async function autoCorrectWithOpenAI(apiKey, songTitle, openaiModel) {
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: openaiModel || 'gpt-4.1',
+      messages: [
+        { role: 'system', content: AUTOCORRECT_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: buildAutoCorrectPrompt(songTitle),
+        },
+      ],
+      max_tokens: 256,
+      temperature: 0.2,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(
+      `OpenAI API error: ${response.status} - ${errorData.error?.message || response.statusText}`
+    );
+  }
+
+  const data = await response.json();
+  const text = data.choices?.[0]?.message?.content;
+  if (!text) {
+    throw new Error('Empty response from OpenAI API');
+  }
+
+  return parseAutoCorrectResponse(text);
+}
+
+async function autoCorrectWithGemini(apiKey, songTitle) {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: `${AUTOCORRECT_SYSTEM_PROMPT}\n\n${buildAutoCorrectPrompt(songTitle)}`,
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          maxOutputTokens: 256,
+          temperature: 0.2,
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(
+      `Gemini API error: ${response.status} - ${errorData.error?.message || response.statusText}`
+    );
+  }
+
+  const data = await response.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    throw new Error('Empty response from Gemini API');
+  }
+
+  return parseAutoCorrectResponse(text);
+}
+
 // Gemini (Google) API
 async function searchWithGemini(apiKey, songTitle, artistName, searchMode) {
   const response = await fetch(
@@ -248,5 +397,26 @@ export async function searchSongRecommendations(
   }
 }
 
+export async function autoCorrectSongMetadata(provider, apiKey, songTitle, openaiModel) {
+  if (!apiKey || apiKey.trim() === '') {
+    throw new Error("Veuillez configurer votre clé API dans l'onglet Paramètres.");
+  }
+
+  if (!songTitle || songTitle.trim() === '') {
+    throw new Error('Veuillez entrer un titre de chanson.');
+  }
+
+  switch (provider) {
+    case 'claude':
+      return autoCorrectWithClaude(apiKey, songTitle);
+    case 'openai':
+      return autoCorrectWithOpenAI(apiKey, songTitle, openaiModel);
+    case 'gemini':
+      return autoCorrectWithGemini(apiKey, songTitle);
+    default:
+      throw new Error(`Fournisseur AI inconnu: ${provider}`);
+  }
+}
+
 // Exported for testing
-export { buildUserPrompt, parseAIResponse };
+export { buildUserPrompt, parseAIResponse, buildAutoCorrectPrompt, parseAutoCorrectResponse };

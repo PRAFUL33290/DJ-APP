@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import { useTheme } from '../context/ThemeContext';
 import { AI_PROVIDERS, OPENAI_MODELS } from '../constants/theme';
 import {
@@ -32,6 +33,7 @@ export default function SettingsScreen({ navigation }) {
   const [openaiModel, setOpenaiModel] = useState('gpt-4.1');
   const [saved, setSaved] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const defaultApiKey = Constants.expoConfig?.extra?.DEFAULT_OPENAI_KEY || '';
 
   // Load saved settings on mount
   useEffect(() => {
@@ -47,11 +49,9 @@ export default function SettingsScreen({ navigation }) {
       if (savedApiKey) {
         setApiKey(savedApiKey);
         setSaved(true);
-      } else {
-        // Pre-fill with OpenAI key if nothing is saved
-        const defaultApiKey = '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';
+      } else if (defaultApiKey) {
+        // Pre-fill with OpenAI key from local env if nothing is saved
         setApiKey(defaultApiKey);
-        // Auto-save the default key
         await storageService.saveApiKey(defaultApiKey);
         await storageService.saveProvider('openai');
         await storageService.saveOpenAIModel('gpt-4.1');

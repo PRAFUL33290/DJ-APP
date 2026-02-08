@@ -13,7 +13,11 @@
       "backgroundColor": "#1a1a2e"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.praful.djapp",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -24,6 +28,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "DEFAULT_OPENAI_KEY": "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",
+      "eas": {
+        "projectId": "1c040319-7fcd-4715-a8ba-8e4fc18d48af"
+      }
     }
   }
 }

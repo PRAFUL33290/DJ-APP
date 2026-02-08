@@ -15,7 +15,7 @@ import {
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { SEARCH_MODES } from '../constants/theme';
-import { searchSongRecommendations } from '../services/aiService';
+import { autoCorrectSongMetadata, searchSongRecommendations } from '../services/aiService';
 import { fetchDeezerPreviewUrl, fetchDeezerTrackInfo } from '../services/deezerService';
 import SongCard from '../components/SongCard';
 import StarRating from '../components/StarRating';
@@ -46,6 +46,10 @@ export default function SearchScreen({ route }) {
   const [savedApiKey, setSavedApiKey] = useState('');
   const [savedProvider, setSavedProvider] = useState('openai');
   const [savedOpenAIModel, setSavedOpenAIModel] = useState('gpt-4.1');
+  const [isArtistLocked, setIsArtistLocked] = useState(false);
+  const artistNameRef = useRef('');
+  const isArtistLockedRef = useRef(false);
+  const autoFillRequestId = useRef(0);
 
   // Load saved API key on mount
   useEffect(() => {
@@ -58,6 +62,88 @@ export default function SearchScreen({ route }) {
       loadSavedApiKey();
     }
   }, [route?.params?.refresh]);
+
+  useEffect(() => {
+    artistNameRef.current = artistName;
+  }, [artistName]);
+
+  useEffect(() => {
+    isArtistLockedRef.current = isArtistLocked;
+  }, [isArtistLocked]);
+
+  useEffect(() => {
+    const trimmedTitle = songTitle.trim();
+    if (!trimmedTitle) {
+      if (!isArtistLockedRef.current) {
+        setArtistName('');
+      }
+      return undefined;
+    }
+
+    if (trimmedTitle.length < 3) {
+      return undefined;
+    }
+
+    const requestId = ++autoFillRequestId.current;
+    const timeoutId = setTimeout(async () => {
+      try {
+        const provider = route?.params?.provider || savedProvider || 'openai';
+        const apiKey = route?.params?.apiKey || savedApiKey || '';
+        const openaiModel = route?.params?.openaiModel || savedOpenAIModel || 'gpt-4.1';
+
+        let suggestedTitle = trimmedTitle;
+        let suggestedArtist = '';
+
+        if (apiKey) {
+          try {
+            const aiSuggestion = await autoCorrectSongMetadata(
+              provider,
+              apiKey,
+              trimmedTitle,
+              openaiModel
+            );
+            suggestedTitle = aiSuggestion.title || suggestedTitle;
+            suggestedArtist = aiSuggestion.artist || '';
+          } catch (error) {
+            // Silent fallback to Deezer only
+          }
+        }
+
+        const deezerTrack = await fetchDeezerTrackInfo(
+          suggestedTitle,
+          suggestedArtist || ''
+        );
+
+        if (autoFillRequestId.current !== requestId) {
+          return;
+        }
+
+        const nextTitle = deezerTrack?.title || suggestedTitle;
+        const nextArtist = deezerTrack?.artist || suggestedArtist;
+        const canUpdateArtist =
+          !isArtistLockedRef.current || !artistNameRef.current.trim();
+
+        if (nextTitle && nextTitle !== songTitle) {
+          setSongTitle(nextTitle);
+        }
+        if (nextArtist && canUpdateArtist && nextArtist !== artistNameRef.current) {
+          setArtistName(nextArtist);
+        }
+      } catch (error) {
+        // Ignore auto-fill errors to avoid blocking typing
+      }
+    }, 600);
+
+    return () => clearTimeout(timeoutId);
+  }, [
+    songTitle,
+    route?.params?.provider,
+    route?.params?.apiKey,
+    route?.params?.openaiModel,
+    savedProvider,
+    savedApiKey,
+    savedOpenAIModel,
+  ]);
 
   const loadSavedApiKey = async () => {
     try {
@@ -169,6 +255,7 @@ export default function SearchScreen({ route }) {
   const handleReset = () => {
     setSongTitle('');
     setArtistName('');
+    setIsArtistLocked(false);
     setSearchMode('all');
     setRecommendations([]);
     setHasSearched(false);
@@ -227,7 +314,10 @@ export default function SearchScreen({ route }) {
                 placeholder="Ex: The Weeknd"
                 placeholderTextColor={theme.textTertiary}
                 value={artistName}
-                onChangeText={setArtistName}
+                onChangeText={(text) => {
+                  setArtistName(text);
+                  setIsArtistLocked(true);
+                }}
                 returnKeyType="search"
                 onSubmitEditing={handleSearch}
               />

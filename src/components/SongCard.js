@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
+import * as Clipboard from 'expo-clipboard';
 import { useTheme } from '../context/ThemeContext';
 import StarRating from './StarRating';
 import {
@@ -16,11 +17,18 @@ export default function SongCard({ song, index }) {
   const { theme } = useTheme();
   const styles = createStyles(theme);
   const soundRef = useRef(null);
+  const webAudioRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState(false);
 
   useEffect(() => {
     return () => {
+      if (webAudioRef.current) {
+        webAudioRef.current.pause();
+        webAudioRef.current.src = '';
+        webAudioRef.current = null;
+      }
       if (soundRef.current) {
         soundRef.current.unloadAsync().catch(() => null);
       }
@@ -28,6 +36,16 @@ export default function SongCard({ song, index }) {
   }, []);
 
   const stopPlayback = async () => {
+    if (Platform.OS === 'web') {
+      if (!webAudioRef.current) {
+        return;
+      }
+      webAudioRef.current.pause();
+      webAudioRef.current.currentTime = 0;
+      setIsPlaying(false);
+      return;
+    }
+
     if (!soundRef.current) {
       return;
     }
@@ -55,6 +73,19 @@ export default function SongCard({ song, index }) {
     setIsPreviewLoading(true);
 
     try {
+      if (Platform.OS === 'web') {
+        if (!webAudioRef.current) {
+          webAudioRef.current = new Audio(song.previewUrl);
+          webAudioRef.current.addEventListener('ended', () => {
+            setIsPlaying(false);
+          });
+        }
+
+        await webAudioRef.current.play();
+        setIsPlaying(true);
+        return;
+      }
+
       if (!soundRef.current) {
         const { sound } = await Audio.Sound.createAsync(
           { uri: song.previewUrl },
@@ -81,6 +112,16 @@ export default function SongCard({ song, index }) {
     }
   };
 
+  const handleCopyPress = async () => {
+    try {
+      await Clipboard.setStringAsync(`${song.title} - ${song.artist}`);
+      setCopyFeedback(true);
+      setTimeout(() => setCopyFeedback(false), 1200);
+    } catch (error) {
+      console.warn('Failed to copy track info:', error);
+    }
+  };
+
   return (
     <TouchableOpacity style={styles.card} activeOpacity={0.9}>
       {/* Rank Badge */}
@@ -92,6 +133,16 @@ export default function SongCard({ song, index }) {
       <View style={styles.content}>
         {/* Title and Artist */}
         <View style={styles.titleSection}>
+          <TouchableOpacity
+            style={styles.copyButton}
+            onPress={handleCopyPress}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Copier le titre et l'artiste"
+          >
+            <Ionicons name={copyFeedback ? 'checkmark' : 'copy'} size={16} color={theme.text} />
+            <Text style={styles.copyLabel}>{copyFeedback ? 'Copie' : 'Copier'}</Text>
+          </TouchableOpacity>
           <Text style={styles.title} numberOfLines={2} selectable>
             {song.title}
           </Text>
@@ -198,6 +249,26 @@ const createStyles = (theme) => StyleSheet.create({
   },
   titleSection: {
     marginBottom: SPACING.sm,
+    gap: SPACING.xs,
+  },
+  copyButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.round,
+    backgroundColor: theme.surfaceElevated,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+  },
+  copyLabel: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '700',
+    color: theme.text,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   title: {
     fontSize: getResponsiveValue(FONT_SIZE.lg, FONT_SIZE.xl, FONT_SIZE.xxl),

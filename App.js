@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator } from 'react-native';
 import { Audio } from 'expo-av';
+import Constants from 'expo-constants';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,8 +13,8 @@ import { storageService } from './src/services/storageService';
 
 const Tab = createBottomTabNavigator();
 
-// Default API key that will be auto-saved on first launch
-const DEFAULT_OPENAI_KEY = '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';
+// Default API key from local env (not committed)
+const DEFAULT_OPENAI_KEY = Constants.expoConfig?.extra?.DEFAULT_OPENAI_KEY || '';
 
 function AppContent() {
   const { theme, isDark } = useTheme();
@@ -45,7 +46,7 @@ function AppContent() {
       const savedApiKey = await storageService.getApiKey();
 
       // If no API key is saved, save the default one automatically
-      if (!savedApiKey) {
+      if (!savedApiKey && DEFAULT_OPENAI_KEY) {
         console.log('No API key found, saving default OpenAI key...');
         await storageService.saveApiKey(DEFAULT_OPENAI_KEY);
         await storageService.saveProvider('openai');
