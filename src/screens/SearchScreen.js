@@ -50,6 +50,7 @@ export default function SearchScreen({ route }) {
   const artistNameRef = useRef('');
   const isArtistLockedRef = useRef(false);
   const autoFillRequestId = useRef(0);
+  const searchRequestId = useRef(0);
 
   // Load saved API key on mount
   useEffect(() => {
@@ -181,6 +182,8 @@ export default function SearchScreen({ route }) {
       return;
     }
 
+    const requestId = ++searchRequestId.current;
+
     // Use saved API key or route params (route params take priority if present)
     const provider = route?.params?.provider || savedProvider || 'openai';
     const apiKey = route?.params?.apiKey || savedApiKey || '';
@@ -220,8 +223,16 @@ export default function SearchScreen({ route }) {
         searchMode,
         openaiModel
       );
+
+      if (searchRequestId.current !== requestId) {
+        return;
+      }
       const baseRecommendations = results.recommendations || [];
       const recommendationsWithPreview = await attachPreviews(baseRecommendations);
+
+      if (searchRequestId.current !== requestId) {
+        return;
+      }
       setRecommendations(recommendationsWithPreview);
       const currentFromAI = results.current || null;
       if (currentFromAI) {
@@ -244,11 +255,16 @@ export default function SearchScreen({ route }) {
         );
       }
     } catch (error) {
+      if (searchRequestId.current !== requestId) {
+        return;
+      }
       Alert.alert('Erreur', error.message || 'Une erreur est survenue lors de la recherche.');
       setRecommendations([]);
       setCurrentTrack(null);
     } finally {
-      setIsLoading(false);
+      if (searchRequestId.current === requestId) {
+        setIsLoading(false);
+      }
     }
   };
 
