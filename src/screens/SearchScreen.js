@@ -119,14 +119,10 @@ export default function SearchScreen({ route }) {
           return;
         }
 
-        const nextTitle = deezerTrack?.title || suggestedTitle;
         const nextArtist = deezerTrack?.artist || suggestedArtist;
         const canUpdateArtist =
           !isArtistLockedRef.current || !artistNameRef.current.trim();
 
-        if (nextTitle && nextTitle !== songTitle) {
-          setSongTitle(nextTitle);
-        }
         if (nextArtist && canUpdateArtist && nextArtist !== artistNameRef.current) {
           setArtistName(nextArtist);
         }
