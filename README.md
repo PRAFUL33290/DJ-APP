@@ -1,16 +1,35 @@
-# 🎧 DJ App - Song Recommendation
+# 🎧 DJ PRAFUL D - Live Mix Assistant
 
-Application mobile pour DJ qui propose le titre de chanson suivante en rapport avec le BPM, le style musical et l'artiste.
+Application mobile professionnelle pour DJ qui propose les meilleures transitions musicales grâce à l'intelligence artificielle.
 
-## Fonctionnalités
+## ✨ Fonctionnalités
 
-- **Recherche intelligente** : Entrez un titre de chanson et obtenez des recommandations pour la transition parfaite
-- **Modes de recherche** : Recherchez par BPM, style musical, artiste, ou tous les critères combinés
-- **Multi-AI** : Supporte Claude (Anthropic), OpenAI (GPT), et Gemini (Google) comme fournisseurs d'IA
-- **Notation de popularité** : Chaque chanson recommandée est notée de 1 à 5 étoiles selon sa popularité
-- **Interface DJ** : Design sombre adapté pour une utilisation en cabine DJ
+### 🎵 Recherche Intelligente
+- **Gros bouton circulaire** optimisé pour utilisation en live
+- Recommandations basées sur BPM, style musical et artiste
+- Interface **plein écran** sur mobile
+- **4 modes de recherche** : BPM, Style, Artiste, ou Tous les critères
 
-## Installation
+### 🎨 Design Professionnel
+- **Style Deezer** moderne et élégant
+- **Mode Dark/Light** avec option Auto
+- **Responsive** : Mobile, Tablette, Desktop
+- Cartes de résultats détaillées avec raisons des recommandations
+
+### 🤖 Multi-IA
+- **Claude (Anthropic)** - Recommandé
+- **OpenAI (GPT)** - Alternative
+- **Gemini (Google)** - Alternative
+
+### 🎯 Optimisé pour DJ
+- Notation de popularité (1-5 étoiles)
+- Interface adaptée pour cabine DJ
+- Navigation rapide entre recherche et paramètres
+- Nom du DJ personnalisé : **DJ PRAFUL D**
+
+## 📱 Installation & Utilisation
+
+### Développement Local
 
 ```bash
 # Cloner le repository
@@ -21,7 +40,31 @@ cd DJ-APP
 npm install
 
 # Lancer l'application
-npm start
+npm start           # Mode développement avec Expo
+npm run web         # Mode web (navigateur)
+npm run android     # Mode Android
+npm run ios         # Mode iOS
+```
+
+### 🚀 Build pour Expo Go
+
+Consultez le guide complet : [EXPO_BUILD_GUIDE.md](./EXPO_BUILD_GUIDE.md)
+
+**Option 1 - Expo Go (Rapide)** :
+1. Installez [Expo Go](https://expo.dev/client) sur votre smartphone
+2. Lancez `npm start`
+3. Scannez le QR code
+
+**Option 2 - Build APK/IPA** :
+```bash
+# Installer EAS CLI
+npm install -g eas-cli
+
+# Build Android
+eas build --platform android --profile preview
+
+# Build iOS
+eas build --platform ios --profile preview
 ```
 
 ## Configuration

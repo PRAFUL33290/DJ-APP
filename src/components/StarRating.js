@@ -1,13 +1,25 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { COLORS } from '../constants/theme';
+import { useTheme } from '../context/ThemeContext';
 
 export default function StarRating({ rating, size = 18 }) {
+  const { theme } = useTheme();
+
   const stars = [];
   for (let i = 1; i <= 5; i++) {
+    const isFilled = i <= rating;
     stars.push(
-      <Text key={i} style={[styles.star, { fontSize: size }]}>
-        {i <= rating ? '★' : '☆'}
+      <Text
+        key={i}
+        style={[
+          styles.star,
+          {
+            fontSize: size,
+            color: isFilled ? theme.star : theme.starEmpty,
+          }
+        ]}
+      >
+        {isFilled ? '★' : '☆'}
       </Text>
     );
   }
@@ -21,7 +33,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   star: {
-    color: COLORS.star,
     marginRight: 2,
   },
 });

@@ -8,8 +8,8 @@ export const COLORS = {
   surfaceLight: '#1f3056',
   text: '#ffffff',
   textSecondary: '#a0a0b8',
-  accent: '#e17055',
-  star: '#fdcb6e',
+  accent: '#a238ff',
+  star: '#a238ff',
   starEmpty: '#444466',
   border: '#2d2d4a',
   error: '#ff6b6b',
@@ -18,10 +18,11 @@ export const COLORS = {
 
 // Search modes
 export const SEARCH_MODES = [
-  { id: 'bpm', label: 'BPM', icon: '🎵' },
-  { id: 'style', label: 'Style musical', icon: '🎸' },
-  { id: 'artist', label: 'Artiste', icon: '🎤' },
-  { id: 'all', label: 'Tous les critères', icon: '🔍' },
+  { id: 'bpm', label: 'BPM', iconName: 'musical-notes', iconFamily: 'Ionicons' },
+  { id: 'style', label: 'Style musical', iconName: 'guitar-electric', iconFamily: 'MaterialCommunityIcons' },
+  { id: 'artist', label: 'Artiste', iconName: 'microphone', iconFamily: 'Ionicons' },
+  { id: 'change', label: 'Changer de style musical', iconName: 'shuffle', iconFamily: 'Ionicons' },
+  { id: 'all', label: 'Tous les critères', iconName: 'filter', iconFamily: 'Ionicons' },
 ];
 
 // AI Provider options
@@ -29,4 +30,10 @@ export const AI_PROVIDERS = [
   { id: 'claude', label: 'Claude (Anthropic)' },
   { id: 'openai', label: 'OpenAI (GPT)' },
   { id: 'gemini', label: 'Gemini (Google)' },
+];
+
+export const OPENAI_MODELS = [
+  { id: 'gpt-4.1', label: 'GPT-4.1 (qualite)' },
+  { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini (moins cher)' },
+  { id: 'gpt-4o-mini', label: 'GPT-4o Mini (tres economique)' },
 ];

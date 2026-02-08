@@ -3,18 +3,30 @@
 
 const SYSTEM_PROMPT = `Tu es un DJ professionnel expert en transitions musicales. 
 On te donne un titre de chanson (et éventuellement l'artiste), ainsi qu'un mode de recherche.
-Tu dois proposer 5 chansons qui feraient une excellente transition depuis le titre donné.
+Tu dois proposer 5 chansons qui feraient une excellente transition depuis le titre donne.
 
-Pour chaque chanson proposée, tu dois fournir :
+Tu dois aussi fournir les informations de la chanson actuelle :
+- title: le titre de la chanson actuelle
+- artist: l'artiste
+- bpm: le BPM estime
+- popularity: une note de 1 a 5 basee sur la popularite de la chanson (5 = tres populaire)
+
+Pour chaque chanson proposee, tu dois fournir :
 - title: le titre de la chanson
 - artist: l'artiste
-- bpm: le BPM estimé
+- bpm: le BPM estime
 - genre: le genre musical
 - reason: une courte explication de pourquoi cette transition fonctionne bien
-- popularity: une note de 1 à 5 basée sur la popularité de la chanson (5 = très populaire)
+- popularity: une note de 1 a 5 basee sur la popularite de la chanson (5 = tres populaire)
 
-Réponds UNIQUEMENT avec un JSON valide au format suivant, sans aucun texte avant ou après :
+Reponds UNIQUEMENT avec un JSON valide au format suivant, sans aucun texte avant ou apres :
 {
+  "current": {
+    "title": "Nom de la chanson",
+    "artist": "Nom de l'artiste",
+    "bpm": 128,
+    "popularity": 4
+  },
   "recommendations": [
     {
       "title": "Nom de la chanson",
@@ -37,6 +49,7 @@ function buildUserPrompt(songTitle, artistName, searchMode) {
     bpm: 'Recherche basée principalement sur le BPM similaire pour une transition fluide.',
     style: 'Recherche basée principalement sur le style musical / genre similaire.',
     artist: "Recherche basée principalement sur l'artiste ou des artistes similaires.",
+    change: 'Changer complètement de style musical : propose des genres différents et de nouveaux artistes pour surprendre et diversifier le set.',
     all: 'Recherche en prenant en compte tous les critères : BPM, style musical et artiste similaire.',
   };
 
@@ -66,14 +79,25 @@ function parseAIResponse(responseText) {
     throw new Error('Invalid response format: missing recommendations array');
   }
 
-  return parsed.recommendations.map((rec) => ({
-    title: rec.title || 'Unknown',
-    artist: rec.artist || 'Unknown',
-    bpm: rec.bpm || 0,
-    genre: rec.genre || 'Unknown',
-    reason: rec.reason || '',
-    popularity: Math.min(5, Math.max(1, rec.popularity || 3)),
-  }));
+  const clampPopularity = (value) => Math.min(5, Math.max(1, value || 3));
+  const current = parsed.current || {};
+
+  return {
+    current: {
+      title: current.title || 'Unknown',
+      artist: current.artist || 'Unknown',
+      bpm: Number(current.bpm) || 0,
+      popularity: clampPopularity(current.popularity),
+    },
+    recommendations: parsed.recommendations.map((rec) => ({
+      title: rec.title || 'Unknown',
+      artist: rec.artist || 'Unknown',
+      bpm: Number(rec.bpm) || 0,
+      genre: rec.genre || 'Unknown',
+      reason: rec.reason || '',
+      popularity: clampPopularity(rec.popularity),
+    })),
+  };
 }
 
 // Claude (Anthropic) API
@@ -115,7 +139,7 @@ async function searchWithClaude(apiKey, songTitle, artistName, searchMode) {
 }
 
 // OpenAI API
-async function searchWithOpenAI(apiKey, songTitle, artistName, searchMode) {
+async function searchWithOpenAI(apiKey, songTitle, artistName, searchMode, openaiModel) {
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -123,7 +147,7 @@ async function searchWithOpenAI(apiKey, songTitle, artistName, searchMode) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
+      model: openaiModel || 'gpt-4.1',
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         {
@@ -201,7 +225,8 @@ export async function searchSongRecommendations(
   apiKey,
   songTitle,
   artistName,
-  searchMode
+  searchMode,
+  openaiModel
 ) {
   if (!apiKey || apiKey.trim() === '') {
     throw new Error("Veuillez configurer votre clé API dans l'onglet Paramètres.");
@@ -215,7 +240,7 @@ export async function searchSongRecommendations(
     case 'claude':
       return searchWithClaude(apiKey, songTitle, artistName, searchMode);
     case 'openai':
-      return searchWithOpenAI(apiKey, songTitle, artistName, searchMode);
+      return searchWithOpenAI(apiKey, songTitle, artistName, searchMode, openaiModel);
     case 'gemini':
       return searchWithGemini(apiKey, songTitle, artistName, searchMode);
     default:

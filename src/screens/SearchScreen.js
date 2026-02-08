@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,18 +10,84 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Dimensions,
 } from 'react-native';
-import { COLORS, SEARCH_MODES } from '../constants/theme';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useTheme } from '../context/ThemeContext';
+import { SEARCH_MODES } from '../constants/theme';
 import { searchSongRecommendations } from '../services/aiService';
+import { fetchDeezerPreviewUrl, fetchDeezerTrackInfo } from '../services/deezerService';
 import SongCard from '../components/SongCard';
+import StarRating from '../components/StarRating';
+import {
+  SPACING,
+  BORDER_RADIUS,
+  FONT_SIZE,
+  SHADOWS,
+  getResponsiveValue,
+  getButtonSize,
+  getContainerPadding,
+  DEVICE_TYPE,
+} from '../constants/layout';
+import { storageService } from '../services/storageService';
+
+const { width } = Dimensions.get('window');
 
 export default function SearchScreen({ route }) {
+  const { theme } = useTheme();
+  const scrollViewRef = useRef(null);
   const [songTitle, setSongTitle] = useState('');
   const [artistName, setArtistName] = useState('');
   const [searchMode, setSearchMode] = useState('all');
   const [recommendations, setRecommendations] = useState([]);
+  const [currentTrack, setCurrentTrack] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [savedApiKey, setSavedApiKey] = useState('');
+  const [savedProvider, setSavedProvider] = useState('openai');
+  const [savedOpenAIModel, setSavedOpenAIModel] = useState('gpt-4.1');
+
+  // Load saved API key on mount
+  useEffect(() => {
+    loadSavedApiKey();
+  }, []);
+
+  // Also reload when route params change (when coming from Settings)
+  useEffect(() => {
+    if (route?.params?.refresh) {
+      loadSavedApiKey();
+    }
+  }, [route?.params?.refresh]);
+
+  const loadSavedApiKey = async () => {
+    try {
+      const apiKey = await storageService.getApiKey();
+      const provider = await storageService.getProvider();
+      const openaiModel = await storageService.getOpenAIModel();
+
+      if (apiKey) {
+        setSavedApiKey(apiKey);
+      }
+      if (provider) {
+        setSavedProvider(provider);
+      }
+      if (openaiModel) {
+        setSavedOpenAIModel(openaiModel);
+      }
+    } catch (error) {
+      console.error('Error loading saved API key:', error);
+    }
+  };
+
+  const attachPreviews = async (songs) => {
+    const enriched = await Promise.all(
+      songs.map(async (song) => {
+        const previewUrl = await fetchDeezerPreviewUrl(song.title, song.artist);
+        return { ...song, previewUrl };
+      })
+    );
+    return enriched;
+  };
 
   const handleSearch = async () => {
     if (!songTitle.trim()) {
@@ -29,9 +95,10 @@ export default function SearchScreen({ route }) {
       return;
     }
 
-    // Get settings from route params or use defaults
-    const provider = route?.params?.provider || 'claude';
-    const apiKey = route?.params?.apiKey || '';
+    // Use saved API key or route params (route params take priority if present)
+    const provider = route?.params?.provider || savedProvider || 'openai';
+    const apiKey = route?.params?.apiKey || savedApiKey || '';
+    const openaiModel = route?.params?.openaiModel || savedOpenAIModel || 'gpt-4.1';
 
     if (!apiKey) {
       Alert.alert(
@@ -45,243 +112,532 @@ export default function SearchScreen({ route }) {
     setHasSearched(true);
 
     try {
+      const deezerTrack = await fetchDeezerTrackInfo(
+        songTitle.trim(),
+        artistName.trim()
+      );
+      const correctedTitle = deezerTrack?.title || songTitle.trim();
+      const correctedArtist = deezerTrack?.artist || artistName.trim();
+
+      if (correctedTitle !== songTitle) {
+        setSongTitle(correctedTitle);
+      }
+      if (correctedArtist !== artistName) {
+        setArtistName(correctedArtist);
+      }
+
       const results = await searchSongRecommendations(
         provider,
         apiKey,
-        songTitle.trim(),
-        artistName.trim(),
-        searchMode
+        correctedTitle,
+        correctedArtist,
+        searchMode,
+        openaiModel
       );
-      setRecommendations(results);
+      const baseRecommendations = results.recommendations || [];
+      const recommendationsWithPreview = await attachPreviews(baseRecommendations);
+      setRecommendations(recommendationsWithPreview);
+      const currentFromAI = results.current || null;
+      if (currentFromAI) {
+        setCurrentTrack({
+          ...currentFromAI,
+          title: correctedTitle || currentFromAI.title,
+          artist: correctedArtist || currentFromAI.artist,
+          bpm: deezerTrack?.bpm || currentFromAI.bpm,
+        });
+      } else {
+        setCurrentTrack(
+          deezerTrack
+            ? {
+                title: correctedTitle,
+                artist: correctedArtist,
+                bpm: deezerTrack.bpm || 0,
+                popularity: 3,
+              }
+            : null
+        );
+      }
     } catch (error) {
       Alert.alert('Erreur', error.message || 'Une erreur est survenue lors de la recherche.');
       setRecommendations([]);
+      setCurrentTrack(null);
     } finally {
       setIsLoading(false);
     }
   };
 
+  const handleReset = () => {
+    setSongTitle('');
+    setArtistName('');
+    setSearchMode('all');
+    setRecommendations([]);
+    setHasSearched(false);
+    setCurrentTrack(null);
+    scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+  };
+
+  const styles = createStyles(theme);
+  const buttonSize = getButtonSize();
+
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
+    <View style={styles.container}>
+      {/* Header with DJ Name */}
+      <View style={styles.header}>
+        <View style={styles.headerRow}>
+          <View style={styles.headerLeft}>
+            <MaterialCommunityIcons name="headphones" size={getResponsiveValue(32, 38, 44)} color={theme.primary} />
+            <Text style={styles.djName}>DJ PRAFUL D</Text>
+          </View>
+        </View>
+        <Text style={styles.subtitle}>Live Mix Assistant</Text>
+      </View>
+
+      <KeyboardAvoidingView
+        style={styles.contentContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <Text style={styles.header}>🎧 DJ Song Finder</Text>
-        <Text style={styles.subtitle}>Trouvez la chanson parfaite pour votre transition</Text>
-
-        {/* Song Title Input */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Titre de la chanson *</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Ex: Blinding Lights"
-            placeholderTextColor={COLORS.textSecondary}
-            value={songTitle}
-            onChangeText={setSongTitle}
-          />
-        </View>
-
-        {/* Artist Name Input (Optional) */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Artiste (optionnel)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Ex: The Weeknd"
-            placeholderTextColor={COLORS.textSecondary}
-            value={artistName}
-            onChangeText={setArtistName}
-          />
-        </View>
-
-        {/* Search Mode Selection */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Mode de recherche</Text>
-          <View style={styles.modeContainer}>
-            {SEARCH_MODES.map((mode) => (
-              <TouchableOpacity
-                key={mode.id}
-                style={[styles.modeButton, searchMode === mode.id && styles.modeButtonActive]}
-                onPress={() => setSearchMode(mode.id)}
-              >
-                <Text style={styles.modeIcon}>{mode.icon}</Text>
-                <Text
-                  style={[styles.modeLabel, searchMode === mode.id && styles.modeLabelActive]}
-                >
-                  {mode.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        {/* Search Button */}
-        <TouchableOpacity
-          style={[styles.searchButton, isLoading && styles.searchButtonDisabled]}
-          onPress={handleSearch}
-          disabled={isLoading}
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          {isLoading ? (
-            <ActivityIndicator color={COLORS.text} />
-          ) : (
-            <Text style={styles.searchButtonText}>🔍 Rechercher</Text>
+          {/* Main Search Section */}
+          <View style={styles.searchSection}>
+            {/* Song Title Input */}
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Titre actuel</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Ex: Blinding Lights"
+                placeholderTextColor={theme.textTertiary}
+                value={songTitle}
+                onChangeText={setSongTitle}
+                returnKeyType="search"
+                onSubmitEditing={handleSearch}
+              />
+            </View>
+
+            {/* Artist Name Input */}
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Artiste (optionnel)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Ex: The Weeknd"
+                placeholderTextColor={theme.textTertiary}
+                value={artistName}
+                onChangeText={setArtistName}
+                returnKeyType="search"
+                onSubmitEditing={handleSearch}
+              />
+            </View>
+
+            {/* Search Mode Pills */}
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Mode de recherche</Text>
+              <View style={styles.modesGrid}>
+                {SEARCH_MODES.map((mode) => {
+                  const IconComponent = mode.iconFamily === 'Ionicons' ? Ionicons : MaterialCommunityIcons;
+                  return (
+                    <TouchableOpacity
+                      key={mode.id}
+                      style={[
+                        styles.modeChip,
+                        searchMode === mode.id && styles.modeChipActive,
+                      ]}
+                      onPress={() => setSearchMode(mode.id)}
+                      activeOpacity={0.7}
+                    >
+                      <IconComponent
+                        name={mode.iconName}
+                        size={18}
+                        color={searchMode === mode.id ? '#FFFFFF' : theme.textSecondary}
+                        style={styles.modeIcon}
+                      />
+                      <Text
+                        style={[
+                          styles.modeLabel,
+                          searchMode === mode.id && styles.modeLabelActive,
+                        ]}
+                      >
+                        {mode.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            {/* Big Circular Search Button */}
+            <View style={styles.buttonContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.searchButton,
+                  { width: buttonSize, height: buttonSize, borderRadius: buttonSize / 2 },
+                  isLoading && styles.searchButtonDisabled,
+                ]}
+                onPress={handleSearch}
+                disabled={isLoading}
+                activeOpacity={0.8}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color="#FFFFFF" size="large" />
+                ) : (
+                  <>
+                    <Ionicons name="search" size={getResponsiveValue(40, 48, 56)} color="#FFFFFF" />
+                    <Text style={styles.searchButtonText}>GO</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              <Text style={styles.searchButtonHint}>
+                {isLoading ? 'Recherche en cours...' : 'Appuyez pour chercher'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Results Section */}
+          {!isLoading && currentTrack && (
+            <View style={styles.currentSection}>
+              <View style={styles.currentHeader}>
+                <Ionicons name="musical-note" size={20} color={theme.primary} />
+                <Text style={styles.currentTitle}>Musique trouvee</Text>
+              </View>
+              <View style={styles.currentCard}>
+                <View style={styles.currentMain}>
+                  <Text style={styles.currentSong} numberOfLines={2}>
+                    {currentTrack.title}
+                  </Text>
+                  <Text style={styles.currentArtist} numberOfLines={1} selectable>
+                    {currentTrack.artist}
+                  </Text>
+                </View>
+                <View style={styles.currentMetaRow}>
+                  <View style={styles.currentTag}>
+                    <Ionicons name="speedometer" size={14} color={theme.text} style={styles.currentTagIcon} />
+                    <Text style={styles.currentTagText} selectable>{currentTrack.bpm} BPM</Text>
+                  </View>
+                  <View style={styles.currentRating}>
+                    <StarRating rating={currentTrack.popularity} size={16} />
+                    <Text style={styles.currentPopularityText}>Popularite</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
           )}
+
+          {!isLoading && recommendations.length > 0 && (
+            <View style={styles.resultsSection}>
+              <View style={styles.resultsHeader}>
+                <MaterialCommunityIcons name="music-note-multiple" size={24} color={theme.primary} />
+                <Text style={styles.resultsTitle}>
+                  Recommandations ({recommendations.length})
+                </Text>
+              </View>
+              {recommendations.map((song, index) => (
+                <SongCard key={`${song.title}-${index}`} song={song} index={index} />
+              ))}
+            </View>
+          )}
+
+          {!isLoading && hasSearched && recommendations.length === 0 && (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="sad-outline" size={64} color={theme.textSecondary} />
+              <Text style={styles.emptyText}>Aucune recommandation trouvée</Text>
+              <Text style={styles.emptySubtext}>
+                Essayez avec un autre titre ou mode de recherche
+              </Text>
+            </View>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
+      <View style={styles.footer}>
+        <TouchableOpacity
+          style={styles.resetButton}
+          onPress={handleReset}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Reinitialiser la recherche"
+        >
+          <Ionicons name="refresh" size={20} color={theme.text} />
+          <Text style={styles.resetLabel}>Reset</Text>
         </TouchableOpacity>
-
-        {/* Results */}
-        {isLoading && (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={COLORS.primary} />
-            <Text style={styles.loadingText}>Recherche en cours...</Text>
-          </View>
-        )}
-
-        {!isLoading && recommendations.length > 0 && (
-          <View style={styles.resultsContainer}>
-            <Text style={styles.resultsTitle}>
-              🎶 Recommandations ({recommendations.length})
-            </Text>
-            {recommendations.map((song, index) => (
-              <SongCard key={`${song.title}-${index}`} song={song} index={index} />
-            ))}
-          </View>
-        )}
-
-        {!isLoading && hasSearched && recommendations.length === 0 && (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>Aucune recommandation trouvée.</Text>
-            <Text style={styles.emptySubtext}>Essayez avec un autre titre ou mode de recherche.</Text>
-          </View>
-        )}
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </View>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: theme.background,
+  },
+  header: {
+    backgroundColor: theme.surface,
+    paddingTop: Platform.OS === 'ios' ? 50 : 20,
+    paddingBottom: SPACING.md,
+    paddingHorizontal: getContainerPadding(),
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+    width: '100%',
+    maxWidth: DEVICE_TYPE.isDesktop ? 800 : '100%',
+    alignSelf: 'center',
+    ...SHADOWS.small,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: SPACING.md,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  djName: {
+    fontSize: getResponsiveValue(FONT_SIZE.xxl, FONT_SIZE.xxxl, 40),
+    fontWeight: '900',
+    color: theme.primary,
+    textAlign: 'left',
+    letterSpacing: 1,
+  },
+  subtitle: {
+    fontSize: FONT_SIZE.sm,
+    color: theme.textSecondary,
+    textAlign: 'left',
+    marginTop: 4,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 2,
+  },
+  resetButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: getResponsiveValue(16, 18, 20),
+    borderRadius: BORDER_RADIUS.round,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.surfaceElevated || theme.surface,
+  },
+  resetLabel: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+    color: theme.text,
+  },
+  contentContainer: {
+    flex: 1,
+  },
+  footer: {
+    paddingHorizontal: getContainerPadding(),
+    paddingVertical: SPACING.md,
+    borderTopWidth: 1,
+    borderTopColor: theme.border,
+    backgroundColor: theme.surface,
+    width: '100%',
+    maxWidth: DEVICE_TYPE.isDesktop ? 800 : '100%',
+    alignSelf: 'center',
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
+    paddingHorizontal: getContainerPadding(),
+    paddingVertical: SPACING.lg,
+    paddingBottom: SPACING.xxl,
+    width: '100%',
+    maxWidth: DEVICE_TYPE.isDesktop ? 800 : '100%',
+    alignSelf: 'center',
   },
-  header: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: COLORS.text,
-    textAlign: 'center',
-    marginTop: 10,
+  searchSection: {
+    marginBottom: SPACING.xl,
   },
-  subtitle: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    marginBottom: 24,
-    marginTop: 4,
+  inputContainer: {
+    marginBottom: SPACING.lg,
   },
-  inputGroup: {
-    marginBottom: 16,
-  },
-  label: {
-    color: COLORS.text,
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 6,
+  inputLabel: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+    color: theme.text,
+    marginBottom: SPACING.sm,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
   input: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 10,
-    padding: 14,
-    color: COLORS.text,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    backgroundColor: theme.surface,
+    borderRadius: BORDER_RADIUS.md,
+    paddingVertical: getResponsiveValue(14, 16, 18),
+    paddingHorizontal: SPACING.md,
+    fontSize: getResponsiveValue(FONT_SIZE.md, FONT_SIZE.lg, FONT_SIZE.xl),
+    color: theme.text,
+    borderWidth: 2,
+    borderColor: theme.border,
+    ...SHADOWS.small,
   },
-  modeContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+  modesGrid: {
+    flexDirection: 'column',
+    gap: SPACING.sm,
   },
-  modeButton: {
+  modeChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    backgroundColor: theme.surface,
+    borderRadius: BORDER_RADIUS.md,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: getResponsiveValue(16, 18, 20),
+    borderWidth: 2,
+    borderColor: theme.border,
+    ...SHADOWS.small,
   },
-  modeButtonActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+  modeChipActive: {
+    backgroundColor: theme.primary,
+    borderColor: theme.primary,
+    transform: [{ scale: 1.05 }],
   },
   modeIcon: {
-    fontSize: 16,
-    marginRight: 6,
+    marginRight: SPACING.xs,
   },
   modeLabel: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    fontWeight: '500',
+    fontSize: getResponsiveValue(FONT_SIZE.md, FONT_SIZE.lg, FONT_SIZE.lg),
+    fontWeight: '600',
+    color: theme.textSecondary,
   },
   modeLabelActive: {
-    color: COLORS.text,
+    color: '#FFFFFF',
+  },
+  buttonContainer: {
+    alignItems: 'center',
+    marginTop: SPACING.xl,
+    marginBottom: SPACING.lg,
   },
   searchButton: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: theme.primary,
     alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 20,
+    justifyContent: 'center',
+    ...SHADOWS.large,
   },
   searchButtonDisabled: {
-    opacity: 0.7,
+    opacity: 0.6,
   },
   searchButtonText: {
-    color: COLORS.text,
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: getResponsiveValue(FONT_SIZE.lg, FONT_SIZE.xl, FONT_SIZE.xxl),
+    fontWeight: '900',
+    color: '#FFFFFF',
+    marginTop: 8,
+    letterSpacing: 2,
   },
-  loadingContainer: {
+  searchButtonHint: {
+    fontSize: FONT_SIZE.sm,
+    color: theme.textSecondary,
+    marginTop: SPACING.md,
+    fontWeight: '600',
+  },
+  currentSection: {
+    marginTop: SPACING.md,
+    marginBottom: SPACING.xl,
+  },
+  currentHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
-    padding: 30,
+    gap: SPACING.sm,
+    marginBottom: SPACING.sm,
   },
-  loadingText: {
-    color: COLORS.textSecondary,
-    marginTop: 12,
-    fontSize: 14,
+  currentTitle: {
+    fontSize: getResponsiveValue(FONT_SIZE.lg, FONT_SIZE.xl, FONT_SIZE.xxl),
+    fontWeight: '800',
+    color: theme.text,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
-  resultsContainer: {
+  currentCard: {
+    backgroundColor: theme.card,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+    borderWidth: 1,
+    borderColor: theme.border,
+    ...SHADOWS.small,
+  },
+  currentMain: {
+    marginBottom: SPACING.sm,
+  },
+  currentSong: {
+    fontSize: getResponsiveValue(FONT_SIZE.lg, FONT_SIZE.xl, FONT_SIZE.xxl),
+    fontWeight: '800',
+    color: theme.text,
+  },
+  currentArtist: {
+    fontSize: getResponsiveValue(FONT_SIZE.sm, FONT_SIZE.md, FONT_SIZE.lg),
+    fontWeight: '600',
+    color: theme.textSecondary,
     marginTop: 4,
   },
+  currentMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+  },
+  currentTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.surfaceElevated,
+    borderRadius: BORDER_RADIUS.round,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+  },
+  currentTagIcon: {
+    marginRight: 4,
+  },
+  currentTagText: {
+    fontSize: getResponsiveValue(FONT_SIZE.xs, FONT_SIZE.sm, FONT_SIZE.md),
+    fontWeight: '700',
+    color: theme.text,
+  },
+  currentRating: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  currentPopularityText: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '600',
+    color: theme.textTertiary,
+    marginLeft: SPACING.sm,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  resultsSection: {
+    marginTop: SPACING.md,
+  },
+  resultsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    marginBottom: SPACING.md,
+  },
   resultsTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: COLORS.text,
-    marginBottom: 12,
+    fontSize: getResponsiveValue(FONT_SIZE.xl, FONT_SIZE.xxl, FONT_SIZE.xxxl),
+    fontWeight: '800',
+    color: theme.text,
   },
   emptyContainer: {
     alignItems: 'center',
-    padding: 30,
+    paddingVertical: SPACING.xxl * 2,
+    gap: SPACING.md,
   },
   emptyText: {
-    color: COLORS.textSecondary,
-    fontSize: 16,
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
+    color: theme.text,
+    marginBottom: SPACING.xs,
   },
   emptySubtext: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    marginTop: 4,
+    fontSize: FONT_SIZE.sm,
+    color: theme.textSecondary,
+    textAlign: 'center',
+    paddingHorizontal: SPACING.xl,
   },
 });
